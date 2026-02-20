@@ -40,7 +40,7 @@
       <div style="display:flex; flex-wrap:wrap; gap:10px; align-items:center; justify-content:space-between;">
         <div>
           <div style="font-size:18px; font-weight:700;">Lathe G-code Converter</div>
-          <div class="hint">Takes lines containing <span class="mono">V...</span> and <span class="mono">W...</span> and appends <span class="mono">D</span> (cumulative degrees) + a <span class="mono">;rotQty=</span> comment, matching your FileMaker utility’s behavior from the sample.</div>
+          <div class="hint">Accepts lines with <span class="mono">V</span>/<span class="mono">W</span> (planar) or <span class="mono">X</span>, <span class="mono">Z</span>, <span class="mono">A</span> (e.g. lathe). Appends <span class="mono">D</span> (cumulative degrees) + a <span class="mono">;rotQty=</span> comment, matching your FileMaker utility’s behavior from the sample.</div>
         </div>
         <div class="pill"><span>Formula:</span> <span class="mono">rotQty = 2 * sqrt((ΔV)² + (ΔW)²)</span> · <span class="mono">ΔD = rotQty * 360</span></div>
       </div>
@@ -159,6 +159,7 @@
     const lines = normalized.split("\n");
 
     let prevV = null, prevW = null;
+    let prevXYZ = null; // for X/Y/Z/A mode: { X?, Y?, Z?, A? }
     let cumDeg = 0;
     const passWidth = Number(opts.passWidth);
     const safePassWidth = Number.isFinite(passWidth) && passWidth > 0 ? passWidth : 0.5;
@@ -201,69 +202,98 @@
         if (hasN) tokens.shift();
       }
 
-      // Find V and W in the line (we'll keep other tokens)
-      let vTokIdx = -1, wTokIdx = -1;
-      let vVal = null, wVal = null;
+      // Parse all position axes (FileMaker supports X/Y/Z and U/V/W)
+      let vTokIdx = -1, wTokIdx = -1, vVal = null, wVal = null;
+      let xVal = null, yVal = null, zVal = null, aVal = null;
+      let xIdx = -1, yIdx = -1, zIdx = -1, aIdx = -1;
 
       for (let i = 0; i < tokens.length; i++) {
         const parsed = parseTokenNumber(tokens[i]);
         if (!parsed) continue;
-        if (parsed.letter === "V") { vTokIdx = i; vVal = parsed.value; }
-        if (parsed.letter === "W") { wTokIdx = i; wVal = parsed.value; }
+        const letter = parsed.letter;
+        const val = parsed.value;
+        if (letter === "V") { vTokIdx = i; vVal = val; }
+        else if (letter === "W") { wTokIdx = i; wVal = val; }
+        else if (letter === "X") { xIdx = i; xVal = val; }
+        else if (letter === "Y") { yIdx = i; yVal = val; }
+        else if (letter === "Z") { zIdx = i; zVal = val; }
+        else if (letter === "A") { aIdx = i; aVal = val; }
       }
 
-      // Only process if both V and W exist
-      if (vTokIdx !== -1 && wTokIdx !== -1 && Number.isFinite(vVal) && Number.isFinite(wVal)) {
+      const hasVW = vTokIdx !== -1 && wTokIdx !== -1 && Number.isFinite(vVal) && Number.isFinite(wVal);
+      const xyzAxes = []; // { letter, idx, val } for X,Y,Z,A that are present
+      if (xIdx >= 0 && Number.isFinite(xVal)) xyzAxes.push({ letter: "X", idx: xIdx, val: xVal });
+      if (yIdx >= 0 && Number.isFinite(yVal)) xyzAxes.push({ letter: "Y", idx: yIdx, val: yVal });
+      if (zIdx >= 0 && Number.isFinite(zVal)) xyzAxes.push({ letter: "Z", idx: zIdx, val: zVal });
+      if (aIdx >= 0 && Number.isFinite(aVal)) xyzAxes.push({ letter: "A", idx: aIdx, val: aVal });
+      const hasXYZ = xyzAxes.length >= 1; // FileMaker: at least one of X,Y,Z; we include A (e.g. X,Z,A lathe)
+
+      let segmentDistance = 0;
+      let insertAfterIdx = -1;
+      let useVW = false;
+
+      if (hasVW) {
+        useVW = true;
+        insertAfterIdx = Math.max(vTokIdx, wTokIdx);
         if (prevV === null || prevW === null) {
-          // First point: no D, rotQty with no value
           prevV = vVal; prevW = wVal;
           outLines.push(leadingWS + tokens.join(" ") + rotQtySuffix);
           continue;
         }
-
-        const dV = vVal - prevV;
-        const dW = wVal - prevW;
-
-        // FileMaker: segmentDistance = Sqrt((thisV-lastV)² + (thisW-lastW)²); qtyLatheRot = Round(segmentDistance / passWidth, 6)
-        const segmentDistance = Math.sqrt(dV * dV + dW * dW);
-        const rotQty = Math.round((segmentDistance / safePassWidth) * 1e6) / 1e6;
-        const deltaDeg = rotQty * 360;
-
-        cumDeg += deltaDeg;
-        const D = opts.startD + cumDeg;
-        lastD = D;
-
+        const dV = vVal - prevV, dW = wVal - prevW;
+        segmentDistance = Math.sqrt(dV * dV + dW * dW);
         prevV = vVal; prevW = wVal;
-
-        // Insert D after the W token (like sample: V ... W ... D ... F...)
-        const insertAfter = Math.max(vTokIdx, wTokIdx); // safe even if order varies
-        const tokensOut = tokens.slice();
-
-        // If a D token already exists, remove it (avoid duplicates)
-        for (let i = tokensOut.length - 1; i >= 0; i--) {
-          if (/^D[-+]?\d*\.?\d+(?:[eE][-+]?\d+)?$/i.test(tokensOut[i])) tokensOut.splice(i, 1);
+      } else if (hasXYZ) {
+        // FileMaker 3-axis / lathe: segmentDistance = Sqrt((ΔX)² + (ΔY)² + (ΔZ)²); we include A
+        if (prevXYZ === null) {
+          prevXYZ = {};
+          for (const a of xyzAxes) prevXYZ[a.letter] = a.val;
+          insertAfterIdx = Math.max(...xyzAxes.map(a => a.idx));
+          outLines.push(leadingWS + tokens.join(" ") + rotQtySuffix);
+          continue;
         }
-
-        const Dtok = "D" + formatFixed(D, 5);
-        // recompute insert point if we removed earlier indices
-        // easiest: place D right after W token location in current tokensOut
-        let wIndexNow = -1;
-        for (let i = 0; i < tokensOut.length; i++) {
-          if (/^W[-+]?\d/i.test(tokensOut[i])) { wIndexNow = i; break; }
+        let sumSq = 0;
+        for (const a of xyzAxes) {
+          const prev = prevXYZ[a.letter] != null ? prevXYZ[a.letter] : 0;
+          const d = a.val - prev;
+          sumSq += d * d;
         }
-        const pos = (wIndexNow !== -1) ? (wIndexNow + 1) : (insertAfter + 1);
-        tokensOut.splice(pos, 0, Dtok);
-
-        // FileMaker: Round(qtyLatheRot, 6). Optional display: strip leading "0." for compact form
-        let rotTxt = formatFixed(rotQty, 6);
-        if (rotFmt === "semicolon" && rotTxt.startsWith("0.")) rotTxt = rotTxt.slice(1);
-        if (rotFmt === "semicolon" && rotTxt.startsWith("-0.")) rotTxt = "-" + rotTxt.slice(2);
-
-        outLines.push(leadingWS + tokensOut.join(" ") + rotQtySuffix + rotTxt);
-      } else {
-        // Not a V/W line; keep as-is
-        outLines.push(rawLine);
+        segmentDistance = Math.sqrt(sumSq);
+        for (const a of xyzAxes) prevXYZ[a.letter] = a.val;
+        insertAfterIdx = Math.max(...xyzAxes.map(a => a.idx));
       }
+
+      if (!useVW && !hasXYZ) {
+        outLines.push(rawLine);
+        continue;
+      }
+
+      // Compute rotQty and D (same for VW and XYZ)
+      const rotQty = Math.round((segmentDistance / safePassWidth) * 1e6) / 1e6;
+      const deltaDeg = rotQty * 360;
+      cumDeg += deltaDeg;
+      const D = opts.startD + cumDeg;
+      lastD = D;
+
+      const tokensOut = tokens.slice();
+      for (let i = tokensOut.length - 1; i >= 0; i--) {
+        if (/^D[-+]?\d*\.?\d+(?:[eE][-+]?\d+)?$/i.test(tokensOut[i])) tokensOut.splice(i, 1);
+      }
+      const Dtok = "D" + formatFixed(D, 5);
+      // Insert D after the last position axis (W for VW; rightmost of X,Y,Z,A for XYZ)
+      let insertPos = insertAfterIdx + 1;
+      let dIdxNow = -1;
+      const reAxis = useVW ? /^W[-+]?\d/i : /^[XYZA][-+]?\d/i;
+      for (let i = 0; i < tokensOut.length; i++) {
+        if (reAxis.test(tokensOut[i])) dIdxNow = i;
+      }
+      if (dIdxNow >= 0) insertPos = dIdxNow + 1;
+      tokensOut.splice(insertPos, 0, Dtok);
+
+      let rotTxt = formatFixed(rotQty, 6);
+      if (rotFmt === "semicolon" && rotTxt.startsWith("0.")) rotTxt = rotTxt.slice(1);
+      if (rotFmt === "semicolon" && rotTxt.startsWith("-0.")) rotTxt = "-" + rotTxt.slice(2);
+      outLines.push(leadingWS + tokensOut.join(" ") + rotQtySuffix + rotTxt);
     }
 
     return { text: outLines.join("\n"), finalLathePosition: lastD };
