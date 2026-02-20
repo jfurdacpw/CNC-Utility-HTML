@@ -1,0 +1,275 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Lathe G-code Converter (V/W → D + rotQty)</title>
+  <style>
+    :root { color-scheme: light dark; }
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif; margin: 0; padding: 16px; }
+    .wrap { max-width: 1200px; margin: 0 auto; display: grid; gap: 12px; }
+    .bar { display: flex; flex-wrap: wrap; gap: 10px; align-items: end; }
+    .card { border: 1px solid rgba(127,127,127,.35); border-radius: 12px; padding: 12px; }
+    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    textarea { width: 100%; min-height: 420px; resize: vertical; border-radius: 10px; border: 1px solid rgba(127,127,127,.35); padding: 10px; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; font-size: 12.5px; line-height: 1.35; }
+    label { display: grid; gap: 6px; font-size: 13px; }
+    input, select, button { font-size: 14px; }
+    input, select { border-radius: 10px; border: 1px solid rgba(127,127,127,.35); padding: 8px 10px; }
+    button { border-radius: 10px; border: 1px solid rgba(127,127,127,.35); padding: 9px 12px; cursor: pointer; }
+    button.primary { font-weight: 650; }
+    .hint { opacity: .8; font-size: 12px; line-height: 1.35; }
+    .pill { display:inline-flex; gap:8px; align-items:center; padding:6px 10px; border-radius: 999px; border: 1px solid rgba(127,127,127,.35); font-size: 12px; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
+    @media (max-width: 980px) { .grid { grid-template-columns: 1fr; } textarea { min-height: 320px; } }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="card">
+      <div style="display:flex; flex-wrap:wrap; gap:10px; align-items:center; justify-content:space-between;">
+        <div>
+          <div style="font-size:18px; font-weight:700;">Lathe G-code Converter</div>
+          <div class="hint">Takes lines containing <span class="mono">V...</span> and <span class="mono">W...</span> and appends <span class="mono">D</span> (cumulative degrees) + a <span class="mono">;rotQty=</span> comment, matching your FileMaker utility’s behavior from the sample.</div>
+        </div>
+        <div class="pill"><span>Formula:</span> <span class="mono">rotQty = 2 * sqrt((ΔV)² + (ΔW)²)</span> · <span class="mono">ΔD = rotQty * 360</span></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="bar">
+        <label style="min-width:220px;">
+          Starting lathe position (D)
+          <input id="startD" type="number" step="0.00001" value="0" />
+        </label>
+
+        <label style="min-width:220px;">
+          Line numbers
+          <select id="lineMode">
+            <option value="none">None</option>
+            <option value="add">Add N numbers</option>
+            <option value="keep">Keep existing N (don’t add)</option>
+            <option value="replace">Replace existing N / add if missing</option>
+          </select>
+        </label>
+
+        <label style="min-width:160px;">
+          N start
+          <input id="nStart" type="number" step="1" value="10" />
+        </label>
+
+        <label style="min-width:160px;">
+          N increment
+          <input id="nInc" type="number" step="1" value="10" />
+        </label>
+
+        <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:end;">
+          <button class="primary" id="btnConvert">Convert</button>
+          <button id="btnCopy">Copy output</button>
+          <button id="btnDownload">Download .nc</button>
+          <span class="hint" id="status"></span>
+        </div>
+      </div>
+      <div class="hint" style="margin-top:10px;">
+        Notes: First V/W point gets <span class="mono">;rotQty=</span> with no D (like your sample). Blank lines are preserved. If a line contains <span class="mono">F...</span> it remains after D.
+      </div>
+    </div>
+
+    <div class="grid">
+      <div class="card">
+        <div style="font-weight:650; margin-bottom:8px;">Input</div>
+        <textarea id="input" placeholder="Paste your V/W program here..."></textarea>
+      </div>
+
+      <div class="card">
+        <div style="font-weight:650; margin-bottom:8px;">Output</div>
+        <textarea id="output" placeholder="Converted output appears here..." readonly></textarea>
+      </div>
+    </div>
+
+    <div class="hint">
+      Tip for Notion: host this file (Cloudflare Pages / Vercel / Netlify) and embed the URL with Notion’s <span class="mono">/embed</span> block. Notion won’t run raw HTML/JS pasted into a page.
+    </div>
+  </div>
+
+<script>
+(function () {
+  const $ = (id) => document.getElementById(id);
+
+  function parseTokenNumber(tok) {
+    // tok like "V47.729" or "W-1.761"
+    const m = tok.match(/^([A-Za-z])([-+]?\d*\.?\d+(?:[eE][-+]?\d+)?)$/);
+    if (!m) return null;
+    return { letter: m[1].toUpperCase(), value: Number(m[2]) };
+  }
+
+  function isLineNumberToken(tok) {
+    return /^N[-+]?\d+$/i.test(tok);
+  }
+
+  function formatFixed(n, places) {
+    if (!Number.isFinite(n)) return "";
+    // keep trailing zeros like FileMaker output
+    return n.toFixed(places);
+  }
+
+  function convertText(inputText, opts) {
+    const lines = inputText.replace(/\r\n/g, "\n").replace(/\r/g, "\n").split("\n");
+
+    let prevV = null, prevW = null;
+    let cumDeg = 0;
+    let nVal = opts.nStart;
+
+    const outLines = [];
+
+    for (let rawLine of lines) {
+      // Preserve completely blank lines
+      if (rawLine.trim().length === 0) {
+        outLines.push(rawLine);
+        continue;
+      }
+
+      const leadingWS = rawLine.match(/^\s*/)?.[0] ?? "";
+      const trimmed = rawLine.trim();
+      const tokens = trimmed.split(/\s+/);
+
+      // Handle N numbering
+      const hasN = tokens.length > 0 && isLineNumberToken(tokens[0]);
+      const mode = opts.lineMode;
+
+      if (mode === "add") {
+        if (!hasN) {
+          tokens.unshift("N" + String(nVal));
+          nVal += opts.nInc;
+        }
+      } else if (mode === "replace") {
+        if (hasN) tokens.shift();
+        tokens.unshift("N" + String(nVal));
+        nVal += opts.nInc;
+      } else if (mode === "keep") {
+        // do nothing (keep if present, don't add)
+      } else {
+        // none: if user wants none, remove existing N
+        if (hasN) tokens.shift();
+      }
+
+      // Find V and W in the line (we'll keep other tokens)
+      let vTokIdx = -1, wTokIdx = -1;
+      let vVal = null, wVal = null;
+
+      for (let i = 0; i < tokens.length; i++) {
+        const parsed = parseTokenNumber(tokens[i]);
+        if (!parsed) continue;
+        if (parsed.letter === "V") { vTokIdx = i; vVal = parsed.value; }
+        if (parsed.letter === "W") { wTokIdx = i; wVal = parsed.value; }
+      }
+
+      // Only process if both V and W exist
+      if (vTokIdx !== -1 && wTokIdx !== -1 && Number.isFinite(vVal) && Number.isFinite(wVal)) {
+        if (prevV === null || prevW === null) {
+          // First point: no D/rotQty (matches sample)
+          prevV = vVal; prevW = wVal;
+          outLines.push(leadingWS + tokens.join(" ") + " ;rotQty=");
+          continue;
+        }
+
+        const dV = vVal - prevV;
+        const dW = wVal - prevW;
+
+        const dist = Math.sqrt(dV*dV + dW*dW);
+        const rotQty = 2 * dist;
+        const deltaDeg = rotQty * 360;
+
+        cumDeg += deltaDeg;
+        const D = opts.startD + cumDeg;
+
+        prevV = vVal; prevW = wVal;
+
+        // Insert D after the W token (like sample: V ... W ... D ... F...)
+        const insertAfter = Math.max(vTokIdx, wTokIdx); // safe even if order varies
+        const tokensOut = tokens.slice();
+
+        // If a D token already exists, remove it (avoid duplicates)
+        for (let i = tokensOut.length - 1; i >= 0; i--) {
+          if (/^D[-+]?\d*\.?\d+(?:[eE][-+]?\d+)?$/i.test(tokensOut[i])) tokensOut.splice(i, 1);
+        }
+
+        const Dtok = "D" + formatFixed(D, 5);
+        // recompute insert point if we removed earlier indices
+        // easiest: place D right after W token location in current tokensOut
+        let wIndexNow = -1;
+        for (let i = 0; i < tokensOut.length; i++) {
+          if (/^W[-+]?\d/i.test(tokensOut[i])) { wIndexNow = i; break; }
+        }
+        const pos = (wIndexNow !== -1) ? (wIndexNow + 1) : (insertAfter + 1);
+        tokensOut.splice(pos, 0, Dtok);
+
+        // Comment formatting: sample shows rotQty like ".599867" (no leading zero)
+        let rotTxt = formatFixed(rotQty, 6);
+        if (rotTxt.startsWith("0.")) rotTxt = rotTxt.slice(1);
+        if (rotTxt.startsWith("-0.")) rotTxt = "-" + rotTxt.slice(2);
+
+        outLines.push(leadingWS + tokensOut.join(" ") + " ;rotQty=" + rotTxt);
+      } else {
+        // Not a V/W line; keep as-is, but you can still annotate if you want.
+        outLines.push(rawLine);
+      }
+    }
+
+    return outLines.join("\n");
+  }
+
+  function setStatus(msg) {
+    $("status").textContent = msg || "";
+    if (msg) setTimeout(() => { $("status").textContent = ""; }, 2500);
+  }
+
+  function doConvert() {
+    const startD = Number($("startD").value);
+    const lineMode = $("lineMode").value;
+    const nStart = Number($("nStart").value);
+    const nInc = Number($("nInc").value);
+
+    const out = convertText($("input").value, {
+      startD: Number.isFinite(startD) ? startD : 0,
+      lineMode,
+      nStart: Number.isFinite(nStart) ? nStart : 10,
+      nInc: Number.isFinite(nInc) ? nInc : 10,
+    });
+
+    $("output").value = out;
+    setStatus("Converted.");
+  }
+
+  $("btnConvert").addEventListener("click", doConvert);
+
+  $("btnCopy").addEventListener("click", async () => {
+    try {
+      await navigator.clipboard.writeText($("output").value || "");
+      setStatus("Copied to clipboard.");
+    } catch (e) {
+      // Fallback
+      $("output").focus();
+      $("output").select();
+      document.execCommand("copy");
+      setStatus("Copied (fallback).");
+    }
+  });
+
+  $("btnDownload").addEventListener("click", () => {
+    const content = $("output").value || "";
+    const blob = new Blob([content], { type: "text/plain;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "converted.nc";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+    setStatus("Download started.");
+  });
+
+})();
+</script>
+</body>
+</html>
