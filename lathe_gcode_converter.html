@@ -27,10 +27,6 @@
     .field-group { display: flex; flex-wrap: wrap; gap: 10px; align-items: end; }
     .start-pos { background: rgba(0,180,0,.12); }
     .final-pos { background: rgba(220,0,0,.12); }
-    .viz-card { min-width: 0; }
-    .viz-wrap { position: relative; width: 100%; max-width: 100%; border-radius: 10px; overflow: hidden; background: rgba(0,0,0,.04); }
-    .viz-wrap canvas { display: block; width: 100%; height: auto; max-height: 380px; vertical-align: bottom; }
-    @media (prefers-color-scheme: dark) { .viz-wrap { background: rgba(255,255,255,.06); } }
     @media (max-width: 980px) { .grid { grid-template-columns: 1fr; } textarea { min-height: 320px; } }
   </style>
 </head>
@@ -90,14 +86,6 @@
       </div>
     </div>
 
-    <div class="card viz-card">
-      <div style="font-weight:650; margin-bottom:8px;">Toolpath (V / W)</div>
-      <div class="hint" style="margin-bottom:8px;">Path from V and W values in the input. V → horizontal, W → vertical.</div>
-      <div class="viz-wrap">
-        <canvas id="toolpathCanvas" width="800" height="400"></canvas>
-      </div>
-    </div>
-
     <div class="hint">
       Tip for Notion: host this file (Cloudflare Pages / Vercel / Netlify) and embed the URL with Notion’s <span class="mono">/embed</span> block. Notion won’t run raw HTML/JS pasted into a page.
     </div>
@@ -126,16 +114,17 @@
   }
 
   function convertText(inputText, opts) {
-    // Match FileMaker inputTextCleanup: collapse double newlines (¶¶ → ¶)
+    // Match FileMaker inputTextCleanup: single Substitute( "¶¶"; "¶" ) — one replace only
     let normalized = inputText.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
-    while (normalized.indexOf("\n\n") !== -1) normalized = normalized.replace(/\n\n/g, "\n");
+    normalized = normalized.replace(/\n\n/g, "\n");
     const lines = normalized.split("\n");
 
     let prevV = null, prevW = null;
-    let prevXYZ = null; // for X/Y/Z/A mode: { X?, Y?, Z?, A? }
+    let prevXYZ = null; // for X/Y/Z mode (FileMaker has no A in distance)
+    let prevHadX = false, prevHadY = false, prevHadZ = false; // which axes were on previous line (FileMaker clears missing to "")
     let cumDeg = 0;
     const passWidth = Number(opts.passWidth);
-    const safePassWidth = Number.isFinite(passWidth) && passWidth > 0 ? passWidth : 0.5;
+    const safePassWidth = Number.isFinite(passWidth) && passWidth !== 0 ? passWidth : 0.5;
     let nVal = opts.nStart;
     const linePrefix = (opts.lineNumberType || "N").trim() || "N";
     const rotFmt = opts.rotQtyFormat === "colon" ? "colon" : "semicolon";
@@ -194,12 +183,12 @@
       }
 
       const hasVW = vTokIdx !== -1 && wTokIdx !== -1 && Number.isFinite(vVal) && Number.isFinite(wVal);
-      const xyzAxes = []; // { letter, idx, val } for X,Y,Z,A that are present
+      // FileMaker uses only X,Y,Z for 3-axis distance (no A); A is still kept in the output line
+      const xyzAxes = [];
       if (xIdx >= 0 && Number.isFinite(xVal)) xyzAxes.push({ letter: "X", idx: xIdx, val: xVal });
       if (yIdx >= 0 && Number.isFinite(yVal)) xyzAxes.push({ letter: "Y", idx: yIdx, val: yVal });
       if (zIdx >= 0 && Number.isFinite(zVal)) xyzAxes.push({ letter: "Z", idx: zIdx, val: zVal });
-      if (aIdx >= 0 && Number.isFinite(aVal)) xyzAxes.push({ letter: "A", idx: aIdx, val: aVal });
-      const hasXYZ = xyzAxes.length >= 1; // FileMaker: at least one of X,Y,Z; we include A (e.g. X,Z,A lathe)
+      const hasXYZ = xyzAxes.length >= 1;
 
       let segmentDistance = 0;
       let insertAfterIdx = -1;
@@ -217,22 +206,27 @@
         segmentDistance = Math.sqrt(dV * dV + dW * dW);
         prevV = vVal; prevW = wVal;
       } else if (hasXYZ) {
-        // FileMaker 3-axis / lathe: segmentDistance = Sqrt((ΔX)² + (ΔY)² + (ΔZ)²); we include A
+        // FileMaker: segmentDistance = Sqrt((ΔX)² + (ΔY)² + (ΔZ)²); missing axis = 0
         if (prevXYZ === null) {
-          prevXYZ = {};
+          prevXYZ = { X: 0, Y: 0, Z: 0 };
           for (const a of xyzAxes) prevXYZ[a.letter] = a.val;
+          prevHadX = xIdx >= 0; prevHadY = yIdx >= 0; prevHadZ = zIdx >= 0;
           insertAfterIdx = Math.max(...xyzAxes.map(a => a.idx));
+          // First point: no D, rotQty with no value (same as FileMaker when lineCount is 1)
           outLines.push(leadingWS + tokens.join(" ") + rotQtySuffix);
           continue;
         }
-        let sumSq = 0;
-        for (const a of xyzAxes) {
-          const prev = prevXYZ[a.letter] != null ? prevXYZ[a.letter] : 0;
-          const d = a.val - prev;
-          sumSq += d * d;
-        }
-        segmentDistance = Math.sqrt(sumSq);
-        for (const a of xyzAxes) prevXYZ[a.letter] = a.val;
+        // FileMaker: missing axis = 0 in distance (cleared each line). So last = prev had ? prevVal : 0, cur = this line has ? val : 0
+        const lastX = prevHadX ? prevXYZ.X : 0, lastY = prevHadY ? prevXYZ.Y : 0, lastZ = prevHadZ ? prevXYZ.Z : 0;
+        const curX = (xIdx >= 0 && Number.isFinite(xVal)) ? xVal : 0;
+        const curY = (yIdx >= 0 && Number.isFinite(yVal)) ? yVal : 0;
+        const curZ = (zIdx >= 0 && Number.isFinite(zVal)) ? zVal : 0;
+        const dx = curX - lastX, dy = curY - lastY, dz = curZ - lastZ;
+        segmentDistance = Math.sqrt(dx * dx + dy * dy + dz * dz);
+        if (xVal != null && Number.isFinite(xVal)) prevXYZ.X = xVal;
+        if (yVal != null && Number.isFinite(yVal)) prevXYZ.Y = yVal;
+        if (zVal != null && Number.isFinite(zVal)) prevXYZ.Z = zVal;
+        prevHadX = xIdx >= 0; prevHadY = yIdx >= 0; prevHadZ = zIdx >= 0;
         insertAfterIdx = Math.max(...xyzAxes.map(a => a.idx));
       }
 
@@ -248,7 +242,8 @@
       const D = opts.startD + cumDeg;
       lastD = D;
 
-      const tokensOut = tokens.slice();
+      // Keep only G-code-like tokens (letter + number) so stray bare numbers from input don't appear in output
+      const tokensOut = tokens.filter(t => /^[A-Za-z][-+]?\d*\.?\d*(?:[eE][-+]?\d+)?$/i.test(t) || /^[;:]/.test(t));
       for (let i = tokensOut.length - 1; i >= 0; i--) {
         if (/^D[-+]?\d*\.?\d+(?:[eE][-+]?\d+)?$/i.test(tokensOut[i])) tokensOut.splice(i, 1);
       }
@@ -272,140 +267,6 @@
     return { text: outLines.join("\n"), finalLathePosition: lastD };
   }
 
-  function extractVWPoints(inputText) {
-    const lines = (inputText || "").replace(/\r\n/g, "\n").replace(/\r/g, "\n").split("\n");
-    const points = [];
-    for (const rawLine of lines) {
-      const trimmed = rawLine.trim();
-      if (!trimmed) continue;
-      const tokens = trimmed.split(/\s+/);
-      let vVal = null, wVal = null;
-      for (let i = 0; i < tokens.length; i++) {
-        const parsed = parseTokenNumber(tokens[i]);
-        if (!parsed) continue;
-        if (parsed.letter === "V") vVal = parsed.value;
-        if (parsed.letter === "W") wVal = parsed.value;
-      }
-      if (vVal != null && wVal != null && Number.isFinite(vVal) && Number.isFinite(wVal)) {
-        points.push({ v: vVal, w: wVal });
-      }
-    }
-    return points;
-  }
-
-  function drawToolpath(canvas, points) {
-    const dpr = Math.min(2, window.devicePixelRatio || 1);
-    const rect = canvas.getBoundingClientRect();
-    const w = Math.round(rect.width * dpr);
-    const h = Math.round(rect.height * dpr);
-    canvas.width = w;
-    canvas.height = h;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
-
-    const padding = { top: 28, right: 28, bottom: 32, left: 36 };
-    const plotW = w - padding.left - padding.right;
-    const plotH = h - padding.top - padding.bottom;
-
-    ctx.clearRect(0, 0, w, h);
-
-    if (points.length === 0) {
-      ctx.save();
-      ctx.fillStyle = "rgba(127,127,127,.5)";
-      ctx.font = "14px system-ui, sans-serif";
-      ctx.textAlign = "center";
-      ctx.fillText("Enter or paste V/W lines to see the toolpath", w / 2, h / 2);
-      ctx.restore();
-      return;
-    }
-
-    let minV = points[0].v, maxV = points[0].v, minW = points[0].w, maxW = points[0].w;
-    for (let i = 1; i < points.length; i++) {
-      minV = Math.min(minV, points[i].v); maxV = Math.max(maxV, points[i].v);
-      minW = Math.min(minW, points[i].w); maxW = Math.max(maxW, points[i].w);
-    }
-    const rangeV = maxV - minV || 1;
-    const rangeW = maxW - minW || 1;
-    const marginV = rangeV * 0.08 || 0.5;
-    const marginW = rangeW * 0.08 || 0.5;
-    const loV = minV - marginV, hiV = maxV + marginV;
-    const loW = minW - marginW, hiW = maxW + marginW;
-    const spanV = hiV - loV, spanW = hiW - loW;
-
-    function toX(v) { return padding.left + ((v - loV) / spanV) * plotW; }
-    function toY(w) { return padding.top + plotH - ((w - loW) / spanW) * plotH; }
-
-    // Grid
-    ctx.strokeStyle = "rgba(127,127,127,.2)";
-    ctx.lineWidth = 1;
-    const gridSteps = 5;
-    for (let i = 0; i <= gridSteps; i++) {
-      const v = loV + (i / gridSteps) * spanV;
-      const wVal = loW + (i / gridSteps) * spanW;
-      ctx.beginPath();
-      ctx.moveTo(toX(v), padding.top);
-      ctx.lineTo(toX(v), h - padding.bottom);
-      ctx.stroke();
-      ctx.beginPath();
-      ctx.moveTo(padding.left, toY(wVal));
-      ctx.lineTo(canvas.width - padding.right, toY(wVal));
-      ctx.stroke();
-    }
-
-    // Axes
-    ctx.strokeStyle = "rgba(127,127,127,.5)";
-    ctx.lineWidth = 1.5;
-    ctx.beginPath();
-    ctx.moveTo(padding.left, padding.top);
-    ctx.lineTo(padding.left, h - padding.bottom);
-    ctx.lineTo(w - padding.right, h - padding.bottom);
-    ctx.stroke();
-
-    ctx.fillStyle = "rgba(0,0,0,.7)";
-    ctx.font = "12px system-ui, sans-serif";
-    ctx.textAlign = "center";
-    ctx.fillText("V", (padding.left + w - padding.right) / 2, h - 6);
-    ctx.save();
-    ctx.translate(14, h / 2);
-    ctx.rotate(-Math.PI / 2);
-    ctx.textAlign = "center";
-    ctx.fillText("W", 0, 0);
-    ctx.restore();
-
-    // Path
-    ctx.strokeStyle = "rgb(0, 100, 220)";
-    ctx.lineWidth = 2.5;
-    ctx.lineJoin = "round";
-    ctx.lineCap = "round";
-    ctx.beginPath();
-    ctx.moveTo(toX(points[0].v), toY(points[0].w));
-    for (let i = 1; i < points.length; i++) {
-      ctx.lineTo(toX(points[i].v), toY(points[i].w));
-    }
-    ctx.stroke();
-
-    // Points
-    const r = 4;
-    ctx.fillStyle = "rgb(0, 100, 220)";
-    for (let i = 0; i < points.length; i++) {
-      ctx.beginPath();
-      ctx.arc(toX(points[i].v), toY(points[i].w), r, 0, Math.PI * 2);
-      ctx.fill();
-    }
-    ctx.strokeStyle = "rgba(255,255,255,.9)";
-    ctx.lineWidth = 1.5;
-    for (let i = 0; i < points.length; i++) {
-      ctx.beginPath();
-      ctx.arc(toX(points[i].v), toY(points[i].w), r, 0, Math.PI * 2);
-      ctx.stroke();
-    }
-  }
-
-  function updateToolpath() {
-    const points = extractVWPoints($("input").value);
-    drawToolpath($("toolpathCanvas"), points);
-  }
-
   function setStatus(msg) {
     $("status").textContent = msg || "";
     if (msg) setTimeout(() => { $("status").textContent = ""; }, 2500);
@@ -420,7 +281,7 @@
     const rotQtyFormat = ($("rotQtyFormat") && $("rotQtyFormat").value) ? $("rotQtyFormat").value : "semicolon";
 
     const passW = Number($("passWidth").value);
-    const passWidthVal = Number.isFinite(passW) && passW > 0 ? passW : 0.5;
+    const passWidthVal = Number.isFinite(passW) && passW !== 0 ? passW : 0.5;
 
     const result = convertText($("input").value, {
       startD: Number.isFinite(startD) ? startD : 0,
@@ -435,14 +296,7 @@
     $("output").value = result.text;
     $("finalLathePosition").value = result.finalLathePosition != null ? String(result.finalLathePosition) : "";
     setStatus("Converted.");
-    updateToolpath();
   }
-
-  let toolpathDebounce = null;
-  $("input").addEventListener("input", () => {
-    if (toolpathDebounce) clearTimeout(toolpathDebounce);
-    toolpathDebounce = setTimeout(updateToolpath, 180);
-  });
 
   $("btnConvert").addEventListener("click", doConvert);
 
@@ -460,10 +314,6 @@
     $(id).addEventListener("input", updateTravelSpeedF);
   });
   updateTravelSpeedF();
-
-  // Initial draw (empty state message)
-  updateToolpath();
-  window.addEventListener("resize", () => { updateToolpath(); });
 
   $("btnCopy").addEventListener("click", async () => {
     try {
