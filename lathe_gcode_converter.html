@@ -22,6 +22,10 @@
     .hint { opacity: .8; font-size: 12px; line-height: 1.35; }
     .pill { display:inline-flex; gap:8px; align-items:center; padding:6px 10px; border-radius: 999px; border: 1px solid rgba(127,127,127,.35); font-size: 12px; }
     .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
+    .viz-card { min-width: 0; }
+    .viz-wrap { position: relative; width: 100%; max-width: 100%; border-radius: 10px; overflow: hidden; background: rgba(0,0,0,.04); }
+    .viz-wrap canvas { display: block; width: 100%; height: auto; max-height: 380px; vertical-align: bottom; }
+    @media (prefers-color-scheme: dark) { .viz-wrap { background: rgba(255,255,255,.06); } }
     @media (max-width: 980px) { .grid { grid-template-columns: 1fr; } textarea { min-height: 320px; } }
   </style>
 </head>
@@ -85,6 +89,14 @@
       <div class="card">
         <div style="font-weight:650; margin-bottom:8px;">Output</div>
         <textarea id="output" placeholder="Converted output appears here..." readonly></textarea>
+      </div>
+    </div>
+
+    <div class="card viz-card">
+      <div style="font-weight:650; margin-bottom:8px;">Toolpath (V / W)</div>
+      <div class="hint" style="margin-bottom:8px;">Path from V and W values in the input. V → horizontal, W → vertical.</div>
+      <div class="viz-wrap">
+        <canvas id="toolpathCanvas" width="800" height="400"></canvas>
       </div>
     </div>
 
@@ -220,6 +232,140 @@
     return outLines.join("\n");
   }
 
+  function extractVWPoints(inputText) {
+    const lines = (inputText || "").replace(/\r\n/g, "\n").replace(/\r/g, "\n").split("\n");
+    const points = [];
+    for (const rawLine of lines) {
+      const trimmed = rawLine.trim();
+      if (!trimmed) continue;
+      const tokens = trimmed.split(/\s+/);
+      let vVal = null, wVal = null;
+      for (let i = 0; i < tokens.length; i++) {
+        const parsed = parseTokenNumber(tokens[i]);
+        if (!parsed) continue;
+        if (parsed.letter === "V") vVal = parsed.value;
+        if (parsed.letter === "W") wVal = parsed.value;
+      }
+      if (vVal != null && wVal != null && Number.isFinite(vVal) && Number.isFinite(wVal)) {
+        points.push({ v: vVal, w: wVal });
+      }
+    }
+    return points;
+  }
+
+  function drawToolpath(canvas, points) {
+    const dpr = Math.min(2, window.devicePixelRatio || 1);
+    const rect = canvas.getBoundingClientRect();
+    const w = Math.round(rect.width * dpr);
+    const h = Math.round(rect.height * dpr);
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+
+    const padding = { top: 28, right: 28, bottom: 32, left: 36 };
+    const plotW = w - padding.left - padding.right;
+    const plotH = h - padding.top - padding.bottom;
+
+    ctx.clearRect(0, 0, w, h);
+
+    if (points.length === 0) {
+      ctx.save();
+      ctx.fillStyle = "rgba(127,127,127,.5)";
+      ctx.font = "14px system-ui, sans-serif";
+      ctx.textAlign = "center";
+      ctx.fillText("Enter or paste V/W lines to see the toolpath", w / 2, h / 2);
+      ctx.restore();
+      return;
+    }
+
+    let minV = points[0].v, maxV = points[0].v, minW = points[0].w, maxW = points[0].w;
+    for (let i = 1; i < points.length; i++) {
+      minV = Math.min(minV, points[i].v); maxV = Math.max(maxV, points[i].v);
+      minW = Math.min(minW, points[i].w); maxW = Math.max(maxW, points[i].w);
+    }
+    const rangeV = maxV - minV || 1;
+    const rangeW = maxW - minW || 1;
+    const marginV = rangeV * 0.08 || 0.5;
+    const marginW = rangeW * 0.08 || 0.5;
+    const loV = minV - marginV, hiV = maxV + marginV;
+    const loW = minW - marginW, hiW = maxW + marginW;
+    const spanV = hiV - loV, spanW = hiW - loW;
+
+    function toX(v) { return padding.left + ((v - loV) / spanV) * plotW; }
+    function toY(w) { return padding.top + plotH - ((w - loW) / spanW) * plotH; }
+
+    // Grid
+    ctx.strokeStyle = "rgba(127,127,127,.2)";
+    ctx.lineWidth = 1;
+    const gridSteps = 5;
+    for (let i = 0; i <= gridSteps; i++) {
+      const v = loV + (i / gridSteps) * spanV;
+      const wVal = loW + (i / gridSteps) * spanW;
+      ctx.beginPath();
+      ctx.moveTo(toX(v), padding.top);
+      ctx.lineTo(toX(v), h - padding.bottom);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(padding.left, toY(wVal));
+      ctx.lineTo(canvas.width - padding.right, toY(wVal));
+      ctx.stroke();
+    }
+
+    // Axes
+    ctx.strokeStyle = "rgba(127,127,127,.5)";
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(padding.left, padding.top);
+    ctx.lineTo(padding.left, h - padding.bottom);
+    ctx.lineTo(w - padding.right, h - padding.bottom);
+    ctx.stroke();
+
+    ctx.fillStyle = "rgba(0,0,0,.7)";
+    ctx.font = "12px system-ui, sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillText("V", (padding.left + w - padding.right) / 2, h - 6);
+    ctx.save();
+    ctx.translate(14, h / 2);
+    ctx.rotate(-Math.PI / 2);
+    ctx.textAlign = "center";
+    ctx.fillText("W", 0, 0);
+    ctx.restore();
+
+    // Path
+    ctx.strokeStyle = "rgb(0, 100, 220)";
+    ctx.lineWidth = 2.5;
+    ctx.lineJoin = "round";
+    ctx.lineCap = "round";
+    ctx.beginPath();
+    ctx.moveTo(toX(points[0].v), toY(points[0].w));
+    for (let i = 1; i < points.length; i++) {
+      ctx.lineTo(toX(points[i].v), toY(points[i].w));
+    }
+    ctx.stroke();
+
+    // Points
+    const r = 4;
+    ctx.fillStyle = "rgb(0, 100, 220)";
+    for (let i = 0; i < points.length; i++) {
+      ctx.beginPath();
+      ctx.arc(toX(points[i].v), toY(points[i].w), r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.strokeStyle = "rgba(255,255,255,.9)";
+    ctx.lineWidth = 1.5;
+    for (let i = 0; i < points.length; i++) {
+      ctx.beginPath();
+      ctx.arc(toX(points[i].v), toY(points[i].w), r, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+  }
+
+  function updateToolpath() {
+    const points = extractVWPoints($("input").value);
+    drawToolpath($("toolpathCanvas"), points);
+  }
+
   function setStatus(msg) {
     $("status").textContent = msg || "";
     if (msg) setTimeout(() => { $("status").textContent = ""; }, 2500);
@@ -240,9 +386,20 @@
 
     $("output").value = out;
     setStatus("Converted.");
+    updateToolpath();
   }
 
+  let toolpathDebounce = null;
+  $("input").addEventListener("input", () => {
+    if (toolpathDebounce) clearTimeout(toolpathDebounce);
+    toolpathDebounce = setTimeout(updateToolpath, 180);
+  });
+
   $("btnConvert").addEventListener("click", doConvert);
+
+  // Initial draw (empty state message)
+  updateToolpath();
+  window.addEventListener("resize", () => { updateToolpath(); });
 
   $("btnCopy").addEventListener("click", async () => {
     try {
