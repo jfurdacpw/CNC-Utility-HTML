@@ -49,46 +49,13 @@
     <div class="card">
       <div style="font-weight:650; margin-bottom:10px;">Program details</div>
       <div class="field-row">
-        <label><span class="mono">programID</span><input id="programID" type="text" value="2" /></label>
-        <label><span class="mono">operationID</span><input id="operationID" type="text" value="1" /></label>
-        <label><span class="mono">translation</span><input id="translation" type="text" value="Spun Lathe Part" placeholder="e.g. Spun Lathe Part" /></label>
+        <label><span class="mono">programID</span><input id="programID" type="text" /></label>
+        <label><span class="mono">operationID</span><input id="operationID" type="text" /></label>
+        <label><span class="mono">translation</span><input id="translation" type="text" placeholder="e.g. Spun Lathe Part" /></label>
         <label><span class="mono">lineNumberType</span><input id="lineNumberType" type="text" value="N" placeholder="N" /></label>
         <label><span class="mono">passWidth</span><input id="passWidth" type="number" step="0.01" value="0.5" /></label>
-        <label class="full"><span class="mono">programName</span><input id="programName" type="text" value="AK OAK SIDEBOARD 1" placeholder="Program name" style="width:100%;" /></label>
+        <label class="full"><span class="mono">programName</span><input id="programName" type="text" placeholder="Program name" style="width:100%;" /></label>
         <label class="full"><span class="mono">description</span><textarea id="description" rows="2" placeholder="Optional description" style="min-height:52px; resize:vertical;"></textarea></label>
-      </div>
-    </div>
-
-    <div class="card">
-      <div style="font-weight:650; margin-bottom:10px;">Conversion options</div>
-      <div class="bar">
-        <label style="min-width:200px;">
-          Line numbers
-          <select id="lineMode">
-            <option value="none">None</option>
-            <option value="add">Add line numbers</option>
-            <option value="keep">Keep existing (don't add)</option>
-            <option value="replace">Replace existing / add if missing</option>
-          </select>
-        </label>
-        <label style="min-width:100px;"><span class="mono">N</span> start<input id="nStart" type="number" step="1" value="10" /></label>
-        <label style="min-width:100px;"><span class="mono">N</span> increment<input id="nInc" type="number" step="1" value="10" /></label>
-        <label style="min-width:180px;">
-          rotQty comment format
-          <select id="rotQtyFormat">
-            <option value="semicolon">;rotQty=</option>
-            <option value="colon">:rotQty-</option>
-          </select>
-        </label>
-        <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:end;">
-          <button class="primary" id="btnConvert">Convert</button>
-          <button id="btnCopy">Copy output</button>
-          <button id="btnDownload">Download .nc</button>
-          <span class="hint" id="status"></span>
-        </div>
-      </div>
-      <div class="hint" style="margin-top:10px;">
-        Notes: First V/W point gets rotQty with no D. Blank lines preserved. <span class="mono">F...</span> remains after D.
       </div>
     </div>
 
@@ -100,6 +67,12 @@
         <label style="min-width:140px;"><span class="mono">desiredSurfaceSpeed</span><input id="desiredSurfaceSpeed" type="number" step="0.1" value="200" /></label>
         <label style="min-width:160px;"><span class="mono">startingLathePosition</span><input id="startD" class="start-pos" type="number" step="0.00001" value="0" /></label>
         <label style="min-width:160px;"><span class="mono">finalLathePosition</span><input id="finalLathePosition" class="final-pos" type="number" step="0.00001" value="" readonly placeholder="Set after convert" /></label>
+      </div>
+      <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:center; margin-top:12px;">
+        <button class="primary" id="btnConvert">Convert</button>
+        <button id="btnCopy">Copy output</button>
+        <button id="btnDownload">Download .nc</button>
+        <span class="hint" id="status"></span>
       </div>
       <div class="hint" style="margin-top:8px;"><span class="mono">travelSpeedF</span> = Round(passWidth × desiredSurfaceSpeed ÷ (partDiameter × π), 0). Used as feed (F) reference.</div>
     </div>
@@ -440,11 +413,11 @@
 
   function doConvert() {
     const startD = Number($("startD").value);
-    const lineMode = $("lineMode").value;
-    const nStart = Number($("nStart").value);
-    const nInc = Number($("nInc").value);
+    const lineMode = ($("lineMode") && $("lineMode").value) ? $("lineMode").value : "none";
+    const nStart = $("nStart") && $("nStart").value !== "" ? Number($("nStart").value) : 10;
+    const nInc = $("nInc") && $("nInc").value !== "" ? Number($("nInc").value) : 10;
     const lineNumberType = ($("lineNumberType").value || "N").trim() || "N";
-    const rotQtyFormat = $("rotQtyFormat").value;
+    const rotQtyFormat = ($("rotQtyFormat") && $("rotQtyFormat").value) ? $("rotQtyFormat").value : "semicolon";
 
     const passW = Number($("passWidth").value);
     const passWidthVal = Number.isFinite(passW) && passW > 0 ? passW : 0.5;
