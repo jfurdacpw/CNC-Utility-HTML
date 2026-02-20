@@ -6,12 +6,14 @@
   <title>Lathe G-code Converter (V/W → D + rotQty)</title>
   <style>
     :root { color-scheme: light dark; }
+    *, *::before, *::after { box-sizing: border-box; }
     body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif; margin: 0; padding: 16px; }
     .wrap { max-width: 1200px; margin: 0 auto; display: grid; gap: 12px; }
     .bar { display: flex; flex-wrap: wrap; gap: 10px; align-items: end; }
     .card { border: 1px solid rgba(127,127,127,.35); border-radius: 12px; padding: 12px; }
     .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-    textarea { width: 100%; min-height: 420px; resize: vertical; border-radius: 10px; border: 1px solid rgba(127,127,127,.35); padding: 10px; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; font-size: 12.5px; line-height: 1.35; }
+    .grid .card { min-width: 0; }
+    textarea { box-sizing: border-box; width: 100%; min-height: 420px; resize: vertical; border-radius: 10px; border: 1px solid rgba(127,127,127,.35); padding: 10px; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; font-size: 12.5px; line-height: 1.35; }
     label { display: grid; gap: 6px; font-size: 13px; }
     input, select, button { font-size: 14px; }
     input, select { border-radius: 10px; border: 1px solid rgba(127,127,127,.35); padding: 8px 10px; }
