@@ -28,6 +28,11 @@
     .start-pos { background: rgba(0,180,0,.12); }
     .final-pos { background: rgba(220,0,0,.12); }
     .card-title { font-weight: 650; margin-bottom: 4px; font-size: 13px; }
+    .card.program-details { padding: 4px 8px; }
+    .card.program-details .card-title { margin-bottom: 2px; }
+    .card.program-details .field-row { gap: 4px 8px; }
+    .card.program-details label { gap: 1px; font-size: 11px; }
+    .card.program-details input { padding: 3px 6px; font-size: 12px; }
     .toolpath-wrap { position: relative; width: 100%; min-height: 280px; background: var(--toolpath-bg, #1a1a1a); border-radius: 6px; }
     .toolpath-wrap canvas { display: block; width: 100%; height: 100%; }
     .view-label { position: absolute; font-size: 10px; opacity: 0.9; pointer-events: none; color: #00d4aa; }
@@ -47,7 +52,7 @@
       </div>
     </div>
 
-    <div class="card">
+    <div class="card program-details">
       <div class="card-title">Program details</div>
       <div class="field-row">
         <label><span class="mono">programID</span><input id="programID" type="text" /></label>
