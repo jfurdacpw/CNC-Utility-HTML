@@ -7,43 +7,44 @@
   <style>
     :root { color-scheme: light dark; }
     *, *::before, *::after { box-sizing: border-box; }
-    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif; margin: 0; padding: 16px; }
-    .wrap { max-width: 1200px; margin: 0 auto; display: grid; gap: 12px; }
-    .bar { display: flex; flex-wrap: wrap; gap: 10px; align-items: end; }
-    .card { border: 1px solid rgba(127,127,127,.35); border-radius: 12px; padding: 12px; }
-    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif; margin: 0; padding: 6px; }
+    .wrap { max-width: 1200px; margin: 0 auto; display: grid; gap: 6px; }
+    .bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: end; }
+    .card { border: 1px solid rgba(127,127,127,.35); border-radius: 8px; padding: 6px 8px; }
+    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
     .grid .card { min-width: 0; }
-    textarea { box-sizing: border-box; width: 100%; min-height: 420px; resize: vertical; border-radius: 10px; border: 1px solid rgba(127,127,127,.35); padding: 10px; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; font-size: 12.5px; line-height: 1.35; }
-    label { display: grid; gap: 6px; font-size: 13px; }
-    input, select, button { font-size: 14px; }
-    input, select { border-radius: 10px; border: 1px solid rgba(127,127,127,.35); padding: 8px 10px; }
-    button { border-radius: 10px; border: 1px solid rgba(127,127,127,.35); padding: 9px 12px; cursor: pointer; }
+    textarea { box-sizing: border-box; width: 100%; min-height: 120px; height: 120px; resize: vertical; border-radius: 6px; border: 1px solid rgba(127,127,127,.35); padding: 6px 8px; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; font-size: 11px; line-height: 1.3; }
+    label { display: grid; gap: 2px; font-size: 12px; }
+    input, select, button { font-size: 13px; }
+    input, select { border-radius: 6px; border: 1px solid rgba(127,127,127,.35); padding: 4px 6px; }
+    button { border-radius: 6px; border: 1px solid rgba(127,127,127,.35); padding: 5px 8px; cursor: pointer; }
     button.primary { font-weight: 650; }
-    .hint { opacity: .8; font-size: 12px; line-height: 1.35; }
-    .pill { display:inline-flex; flex-wrap:wrap; gap:8px; align-items:center; padding:6px 10px; border-radius: 999px; border: 1px solid rgba(127,127,127,.35); font-size: 12px; }
+    .hint { opacity: .85; font-size: 11px; line-height: 1.25; }
+    .pill { display:inline-flex; flex-wrap:wrap; gap:6px; align-items:center; padding:4px 8px; border-radius: 999px; border: 1px solid rgba(127,127,127,.35); font-size: 11px; }
     .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
-    .field-row { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 10px 16px; align-items: end; }
+    .field-row { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 6px 10px; align-items: end; }
     .field-row .full { grid-column: 1 / -1; }
-    .field-group { display: flex; flex-wrap: wrap; gap: 10px; align-items: end; }
+    .field-group { display: flex; flex-wrap: wrap; gap: 6px 8px; align-items: end; }
     .start-pos { background: rgba(0,180,0,.12); }
     .final-pos { background: rgba(220,0,0,.12); }
-    @media (max-width: 980px) { .grid { grid-template-columns: 1fr; } textarea { min-height: 320px; } }
+    .card-title { font-weight: 650; margin-bottom: 4px; font-size: 13px; }
+    @media (max-width: 980px) { .grid { grid-template-columns: 1fr; } }
   </style>
 </head>
 <body>
   <div class="wrap">
     <div class="card">
-      <div style="display:flex; flex-wrap:wrap; gap:10px; align-items:center; justify-content:space-between;">
+      <div style="display:flex; flex-wrap:wrap; gap:6px; align-items:center; justify-content:space-between;">
         <div>
-          <div style="font-size:18px; font-weight:700;">Lathe G-code Converter</div>
-          <div class="hint">Accepts lines with <span class="mono">V</span>/<span class="mono">W</span> (planar) or <span class="mono">X</span>, <span class="mono">Z</span>, <span class="mono">A</span> (e.g. lathe). Appends <span class="mono">D</span> (cumulative degrees) + a <span class="mono">;rotQty=</span> comment, matching your FileMaker utility’s behavior from the sample.</div>
+          <div style="font-size:15px; font-weight:700;">Lathe G-code Converter</div>
+          <div class="hint">Accepts <span class="mono">V</span>/<span class="mono">W</span> or <span class="mono">X</span>,<span class="mono">Z</span>,<span class="mono">A</span>. Appends <span class="mono">D</span> + <span class="mono">;rotQty=</span> (FileMaker-compatible).</div>
         </div>
         <div class="pill"><span>Formula:</span> <span class="mono">segment = √((ΔX)²+(ΔY)²+(ΔZ)²)</span> or <span class="mono">√((ΔV)²+(ΔW)²)</span>; missing axis = 0 · <span class="mono">rotQty = segment ÷ passWidth</span> · <span class="mono">ΔD = rotQty × 360</span> (D cumulative)</div>
       </div>
     </div>
 
     <div class="card">
-      <div style="font-weight:650; margin-bottom:10px;">Program details</div>
+      <div class="card-title">Program details</div>
       <div class="field-row">
         <label><span class="mono">programID</span><input id="programID" type="text" /></label>
         <label><span class="mono">operationID</span><input id="operationID" type="text" /></label>
@@ -51,12 +52,12 @@
         <label><span class="mono">lineNumberType</span><input id="lineNumberType" type="text" value="N" placeholder="N" /></label>
         <label><span class="mono">passWidth</span><input id="passWidth" type="number" step="0.01" value="0.5" /></label>
         <label class="full"><span class="mono">programName</span><input id="programName" type="text" placeholder="Program name" style="width:100%;" /></label>
-        <label class="full"><span class="mono">description</span><textarea id="description" rows="2" placeholder="Optional description" style="min-height:52px; resize:vertical;"></textarea></label>
+        <label class="full"><span class="mono">description</span><textarea id="description" rows="1" placeholder="Optional description" style="min-height:32px; resize:vertical;"></textarea></label>
       </div>
     </div>
 
     <div class="card">
-      <div style="font-weight:650; margin-bottom:10px;">Conversion parameters</div>
+      <div class="card-title">Conversion parameters</div>
       <div class="field-group">
         <label style="min-width:120px;"><span class="mono">partDiameter</span><input id="partDiameter" type="number" step="0.01" value="1.25" /></label>
         <label style="min-width:120px;"><span class="mono">travelSpeedF</span><input id="travelSpeedF" type="number" step="0.1" value="25" readonly title="Calculated: passWidth × desiredSurfaceSpeed ÷ (partDiameter × π)" /></label>
@@ -64,25 +65,25 @@
         <label style="min-width:160px;"><span class="mono">startingLathePosition</span><input id="startD" class="start-pos" type="number" step="0.00001" value="0" /></label>
         <label style="min-width:160px;"><span class="mono">finalLathePosition</span><input id="finalLathePosition" class="final-pos" type="number" step="0.00001" value="" readonly placeholder="Set after convert" /></label>
       </div>
-      <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:center; margin-top:12px;">
+      <div style="display:flex; gap:6px; flex-wrap:wrap; align-items:center; margin-top:6px;">
         <button class="primary" id="btnConvert">Convert</button>
         <button id="btnCopy">Copy output</button>
         <button id="btnDownload">Download .nc</button>
         <span class="hint" id="status"></span>
       </div>
-      <div class="hint" style="margin-top:8px;"><span class="mono">travelSpeedF</span> = Round(passWidth × desiredSurfaceSpeed ÷ (partDiameter × π), 0). Used as feed (F) reference.</div>
+      <div class="hint" style="margin-top:4px;"><span class="mono">travelSpeedF</span> = Round(passWidth × desiredSurfaceSpeed ÷ (partDiameter × π), 0).</div>
     </div>
 
 
     <div class="grid">
       <div class="card">
-        <div style="font-weight:650; margin-bottom:8px;">Input</div>
-        <textarea id="input" placeholder="Paste your V/W program here..."></textarea>
+        <div class="card-title">Input</div>
+        <textarea id="input" placeholder="Paste G-code here..."></textarea>
       </div>
 
       <div class="card">
-        <div style="font-weight:650; margin-bottom:8px;">Output</div>
-        <textarea id="output" placeholder="Converted output appears here..." readonly></textarea>
+        <div class="card-title">Output</div>
+        <textarea id="output" placeholder="Converted output..." readonly></textarea>
       </div>
     </div>
 
