@@ -20,7 +20,7 @@
     button { border-radius: 10px; border: 1px solid rgba(127,127,127,.35); padding: 9px 12px; cursor: pointer; }
     button.primary { font-weight: 650; }
     .hint { opacity: .8; font-size: 12px; line-height: 1.35; }
-    .pill { display:inline-flex; gap:8px; align-items:center; padding:6px 10px; border-radius: 999px; border: 1px solid rgba(127,127,127,.35); font-size: 12px; }
+    .pill { display:inline-flex; flex-wrap:wrap; gap:8px; align-items:center; padding:6px 10px; border-radius: 999px; border: 1px solid rgba(127,127,127,.35); font-size: 12px; }
     .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
     .field-row { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 10px 16px; align-items: end; }
     .field-row .full { grid-column: 1 / -1; }
@@ -38,7 +38,7 @@
           <div style="font-size:18px; font-weight:700;">Lathe G-code Converter</div>
           <div class="hint">Accepts lines with <span class="mono">V</span>/<span class="mono">W</span> (planar) or <span class="mono">X</span>, <span class="mono">Z</span>, <span class="mono">A</span> (e.g. lathe). Appends <span class="mono">D</span> (cumulative degrees) + a <span class="mono">;rotQty=</span> comment, matching your FileMaker utility’s behavior from the sample.</div>
         </div>
-        <div class="pill"><span>Formula:</span> <span class="mono">rotQty = 2 * sqrt((ΔV)² + (ΔW)²)</span> · <span class="mono">ΔD = rotQty * 360</span></div>
+        <div class="pill"><span>Formula:</span> <span class="mono">segment = √((ΔX)²+(ΔY)²+(ΔZ)²)</span> or <span class="mono">√((ΔV)²+(ΔW)²)</span>; missing axis = 0 · <span class="mono">rotQty = segment ÷ passWidth</span> · <span class="mono">ΔD = rotQty × 360</span> (D cumulative)</div>
       </div>
     </div>
 
@@ -86,9 +86,6 @@
       </div>
     </div>
 
-    <div class="hint">
-      Tip for Notion: host this file (Cloudflare Pages / Vercel / Netlify) and embed the URL with Notion’s <span class="mono">/embed</span> block. Notion won’t run raw HTML/JS pasted into a page.
-    </div>
   </div>
 
 <script>
