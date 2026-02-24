@@ -41,9 +41,9 @@
       <div style="display:flex; flex-wrap:wrap; gap:6px; align-items:center; justify-content:space-between;">
         <div>
           <div style="font-size:15px; font-weight:700;">Lathe G-code Converter</div>
-          <div class="hint">Accepts <span class="mono">V</span>/<span class="mono">W</span> or <span class="mono">X</span>,<span class="mono">Z</span>,<span class="mono">A</span>. Appends <span class="mono">D</span> + <span class="mono">;rotQty=</span> (FileMaker-compatible).</div>
+          <div class="hint">Accepts <span class="mono">U</span>/<span class="mono">V</span>/<span class="mono">W</span> or <span class="mono">X</span>,<span class="mono">Z</span>,<span class="mono">A</span>. Appends <span class="mono">D</span> + <span class="mono">;rotQty=</span> (FileMaker-compatible).</div>
         </div>
-        <div class="pill"><span>Formula:</span> <span class="mono">segment = √((ΔX)²+(ΔY)²+(ΔZ)²)</span> or <span class="mono">√((ΔV)²+(ΔW)²)</span>; missing axis = 0 · <span class="mono">rotQty = segment ÷ passWidth</span> · <span class="mono">ΔD = rotQty × 360</span> (D cumulative)</div>
+        <div class="pill"><span>Formula:</span> <span class="mono">segment = √((ΔX)²+(ΔY)²+(ΔZ)²)</span> or <span class="mono">√((ΔU)²+(ΔW)²)</span>/<span class="mono">√((ΔV)²+(ΔW)²)</span>; missing axis = 0 · <span class="mono">rotQty = segment ÷ passWidth</span> · <span class="mono">ΔD = rotQty × 360</span> (D cumulative)</div>
       </div>
     </div>
 
@@ -100,7 +100,7 @@
         <span class="view-label" id="viewFront" style="bottom: 6px; left: 8px;">Front</span>
         <span class="view-label" id="viewRight" style="bottom: 6px; right: 8px;">Right</span>
       </div>
-      <div class="hint" style="margin-top:4px;">Top / Front / Right (orthographic) + Isometric. X,Y,Z or V,W. Updates after Convert.</div>
+      <div class="hint" style="margin-top:4px;">Top / Front / Right (orthographic) + Isometric. X,Y,Z or U,V,W. Updates after Convert.</div>
     </div>
 
   </div>
@@ -134,6 +134,7 @@
     const lines = normalized.split("\n");
 
     let prevV = null, prevW = null;
+    let prevU = null;
     let prevXYZ = null; // for X/Y/Z mode (FileMaker has no A in distance)
     let prevHadX = false, prevHadY = false, prevHadZ = false; // which axes were on previous line (FileMaker clears missing to "")
     let cumDeg = 0;
@@ -180,6 +181,7 @@
 
       // Parse all position axes (FileMaker supports X/Y/Z and U/V/W)
       let vTokIdx = -1, wTokIdx = -1, vVal = null, wVal = null;
+      let uTokIdx = -1, uVal = null;
       let xVal = null, yVal = null, zVal = null, aVal = null;
       let xIdx = -1, yIdx = -1, zIdx = -1, aIdx = -1;
 
@@ -188,7 +190,8 @@
         if (!parsed) continue;
         const letter = parsed.letter;
         const val = parsed.value;
-        if (letter === "V") { vTokIdx = i; vVal = val; }
+        if (letter === "U") { uTokIdx = i; uVal = val; }
+        else if (letter === "V") { vTokIdx = i; vVal = val; }
         else if (letter === "W") { wTokIdx = i; wVal = val; }
         else if (letter === "X") { xIdx = i; xVal = val; }
         else if (letter === "Y") { yIdx = i; yVal = val; }
@@ -197,6 +200,7 @@
       }
 
       const hasVW = vTokIdx !== -1 && wTokIdx !== -1 && Number.isFinite(vVal) && Number.isFinite(wVal);
+      const hasUW = uTokIdx !== -1 && wTokIdx !== -1 && Number.isFinite(uVal) && Number.isFinite(wVal);
       // FileMaker uses only X,Y,Z for 3-axis distance (no A); A is still kept in the output line
       const xyzAxes = [];
       if (xIdx >= 0 && Number.isFinite(xVal)) xyzAxes.push({ letter: "X", idx: xIdx, val: xVal });
@@ -207,6 +211,7 @@
       let segmentDistance = 0;
       let insertAfterIdx = -1;
       let useVW = false;
+      let useUW = false;
 
       if (hasVW) {
         useVW = true;
@@ -219,6 +224,17 @@
         const dV = vVal - prevV, dW = wVal - prevW;
         segmentDistance = Math.sqrt(dV * dV + dW * dW);
         prevV = vVal; prevW = wVal;
+      } else if (hasUW) {
+        useUW = true;
+        insertAfterIdx = Math.max(uTokIdx, wTokIdx);
+        if (prevU === null || prevW === null) {
+          prevU = uVal; prevW = wVal;
+          outLines.push(leadingWS + tokens.join(" ") + rotQtySuffix);
+          continue;
+        }
+        const dU = uVal - prevU, dW = wVal - prevW;
+        segmentDistance = Math.sqrt(dU * dU + dW * dW);
+        prevU = uVal; prevW = wVal;
       } else if (hasXYZ) {
         // FileMaker: segmentDistance = Sqrt((ΔX)² + (ΔY)² + (ΔZ)²); missing axis = 0
         if (prevXYZ === null) {
@@ -244,7 +260,7 @@
         insertAfterIdx = Math.max(...xyzAxes.map(a => a.idx));
       }
 
-      if (!useVW && !hasXYZ) {
+      if (!useVW && !useUW && !hasXYZ) {
         outLines.push(rawLine);
         continue;
       }
@@ -265,7 +281,7 @@
       // Insert D after the last position axis (W for VW; rightmost of X,Y,Z,A for XYZ)
       let insertPos = insertAfterIdx + 1;
       let dIdxNow = -1;
-      const reAxis = useVW ? /^W[-+]?\d/i : /^[XYZA][-+]?\d/i;
+      const reAxis = useVW || useUW ? /^W[-+]?\d/i : /^[XYZA][-+]?\d/i;
       for (let i = 0; i < tokensOut.length; i++) {
         if (reAxis.test(tokensOut[i])) dIdxNow = i;
       }
@@ -296,12 +312,13 @@
       const tokens = trimmed.split(/\s+/);
       if (tokens.length && isLineNumberToken(tokens[0], linePrefix)) tokens.shift();
 
-      let vVal = null, wVal = null, xVal = null, yVal = null, zVal = null;
+      let vVal = null, wVal = null, uVal = null, xVal = null, yVal = null, zVal = null;
       for (let i = 0; i < tokens.length; i++) {
         const p = parseTokenNumber(tokens[i]);
         if (!p) continue;
         const letter = p.letter, val = p.value;
-        if (letter === "V") vVal = val;
+        if (letter === "U") uVal = val;
+        else if (letter === "V") vVal = val;
         else if (letter === "W") wVal = val;
         else if (letter === "X") xVal = val;
         else if (letter === "Y") yVal = val;
@@ -309,16 +326,16 @@
       }
 
       const hasVW = vVal != null && wVal != null && Number.isFinite(vVal) && Number.isFinite(wVal);
+      const hasUW = uVal != null && wVal != null && Number.isFinite(uVal) && Number.isFinite(wVal);
       const hasXYZ = (xVal != null && Number.isFinite(xVal)) || (yVal != null && Number.isFinite(yVal)) || (zVal != null && Number.isFinite(zVal));
 
       if (hasVW) {
         const v = Number(vVal), w = Number(wVal);
-        if (prevV === null && prevW === null) {
-          points.push({ v, w });
-        } else {
-          points.push({ v, w });
-        }
+        points.push({ v, w });
         prevV = v; prevW = w;
+      } else if (hasUW) {
+        const u = Number(uVal), w = Number(wVal);
+        points.push({ u, w });
       } else if (hasXYZ) {
         const x = (xVal != null && Number.isFinite(xVal)) ? Number(xVal) : (prevX != null ? prevX : 0);
         const y = (yVal != null && Number.isFinite(yVal)) ? Number(yVal) : (prevY != null ? prevY : 0);
@@ -333,6 +350,7 @@
     }
 
     if (points.length >= 2 && points[0].v !== undefined) return { points, mode: "vw" };
+    if (points.length >= 2 && points[0].u !== undefined) return { points, mode: "uw" };
     if (points.length >= 2 && (points[0].x !== undefined || points[0].z !== undefined)) return { points, mode: "xyz" };
     return { points: [], mode: "xyz" };
   }
@@ -358,9 +376,10 @@
     if (!ctx || !data || !data.points.length) return;
 
     const { points, mode } = data;
-    // Normalize to 3D (x,y,z) for all views. V,W -> (v, w, 0)
+    // Normalize to 3D (x,y,z) for all views. V,W or U,W -> (x, y, 0)
     const pts3 = points.map(p => {
       if (mode === "vw") return { x: p.v, y: p.w, z: 0 };
+      if (mode === "uw") return { x: p.u, y: p.w, z: 0 };
       return {
         x: p.x != null ? p.x : 0,
         y: p.y != null ? p.y : 0,
