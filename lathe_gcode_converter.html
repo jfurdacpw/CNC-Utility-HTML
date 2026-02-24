@@ -94,7 +94,7 @@
       <div class="toolpath-wrap">
         <canvas id="toolpath" style="max-height: 200px; width: 100%; display: block;"></canvas>
       </div>
-      <div class="hint" style="margin-top:4px;">X,Z (lathe) or V,W from input. Updates after Convert.</div>
+      <div class="hint" style="margin-top:4px;">Isometric view of X,Y,Z (lathe) or V,W (planar). Updates after Convert.</div>
     </div>
 
   </div>
@@ -352,37 +352,35 @@
     }
     const { points, mode } = data;
     const padding = 12;
-    const xMin = 0, xMax = drawW - 2 * padding, yMin = 0, yMax = drawH - 2 * padding;
-
-    let loA = Infinity, hiA = -Infinity, loB = Infinity, hiB = -Infinity;
-    if (mode === "vw") {
-      points.forEach(p => {
-        loA = Math.min(loA, p.v); hiA = Math.max(hiA, p.v);
-        loB = Math.min(loB, p.w); hiB = Math.max(hiB, p.w);
-      });
-    } else {
-      // X,Z lathe: Z along bed (horizontal), X radial (vertical)
-      points.forEach(p => {
-        const a = p.z != null ? p.z : p.x;
-        const b = p.x != null ? p.x : p.z;
-        loA = Math.min(loA, a); hiA = Math.max(hiA, a);
-        loB = Math.min(loB, b); hiB = Math.max(hiB, b);
-      });
-    }
-    const rangeA = hiA - loA || 1;
-    const rangeB = hiB - loB || 1;
-    const scaleA = (xMax - xMin) / rangeA;
-    const scaleB = (yMax - yMin) / rangeB;
-    const scale = Math.min(scaleA, scaleB);
-    const midA = (loA + hiA) / 2;
-    const midB = (loB + hiB) / 2;
-    const pathW = rangeA * scale;
-    const pathH = rangeB * scale;
-    const ox = padding + (xMax - xMin - pathW) / 2 + (rangeA * scale) / 2 - (midA - loA) * scale;
-    const oy = padding + (yMax - yMin - pathH) / 2 + (rangeB * scale) / 2 - (midB - loB) * scale;
-
-    const toX = (a) => ox + (a - loA) * scale;
-    const toY = (b) => oy + (b - loB) * scale;
+    const plotW = drawW - 2 * padding;
+    const plotH = drawH - 2 * padding;
+    // Isometric projection: (x,y,z) -> sx = (x-y)*cos30, sy = z - (x+y)*sin30 (Z-up = positive sy)
+    const C = Math.cos(Math.PI / 6), S = Math.sin(Math.PI / 6);
+    const project = (p) => {
+      let x = 0, y = 0, z = 0;
+      if (mode === "vw") {
+        x = p.v; y = p.w; z = 0;
+      } else {
+        x = p.x != null ? p.x : 0;
+        y = p.y != null ? p.y : 0;
+        z = p.z != null ? p.z : 0;
+      }
+      return { sx: (x - y) * C, sy: z - (x + y) * S };
+    };
+    const projected = points.map(project);
+    let minSx = Infinity, maxSx = -Infinity, minSy = Infinity, maxSy = -Infinity;
+    projected.forEach(({ sx, sy }) => {
+      minSx = Math.min(minSx, sx); maxSx = Math.max(maxSx, sx);
+      minSy = Math.min(minSy, sy); maxSy = Math.max(maxSy, sy);
+    });
+    const rangeSx = maxSx - minSx || 1;
+    const rangeSy = maxSy - minSy || 1;
+    const scale = Math.min(plotW / rangeSx, plotH / rangeSy);
+    const ox = padding + (plotW - rangeSx * scale) / 2 - minSx * scale;
+    const oy = padding + (plotH - rangeSy * scale) / 2 - minSy * scale;
+    // Canvas Y down; isometric sy has Z-up positive, so put higher sy toward bottom: canvasY = oy + sy*scale
+    const toScreenX = (sx) => ox + sx * scale;
+    const toScreenY = (sy) => oy + sy * scale;
 
     const isDark = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
     ctx.fillStyle = isDark ? "#1a1a1a" : "#f0f0f0";
@@ -393,21 +391,15 @@
     ctx.lineJoin = "round";
     ctx.lineCap = "round";
     ctx.beginPath();
-    if (mode === "vw") {
-      ctx.moveTo(toX(points[0].v), toY(points[0].w));
-      for (let i = 1; i < points.length; i++) ctx.lineTo(toX(points[i].v), toY(points[i].w));
-    } else {
-      const ax = (p) => (p.z != null ? p.z : p.x);
-      const ay = (p) => (p.x != null ? p.x : p.z);
-      ctx.moveTo(toX(ax(points[0])), toY(ay(points[0])));
-      for (let i = 1; i < points.length; i++) ctx.lineTo(toX(ax(points[i])), toY(ay(points[i])));
+    const p0 = projected[0];
+    ctx.moveTo(toScreenX(p0.sx), toScreenY(p0.sy));
+    for (let i = 1; i < projected.length; i++) {
+      const p = projected[i];
+      ctx.lineTo(toScreenX(p.sx), toScreenY(p.sy));
     }
     ctx.stroke();
-    // Start point
-    const px = mode === "vw" ? toX(points[0].v) : toX(points[0].z != null ? points[0].z : points[0].x);
-    const py = mode === "vw" ? toY(points[0].w) : toY(points[0].x != null ? points[0].x : points[0].z);
     ctx.beginPath();
-    ctx.arc(px, py, 3, 0, Math.PI * 2);
+    ctx.arc(toScreenX(p0.sx), toScreenY(p0.sy), 3, 0, Math.PI * 2);
     ctx.fill();
   }
 
