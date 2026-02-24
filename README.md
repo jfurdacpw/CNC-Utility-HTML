@@ -1,6 +1,6 @@
 # Lathe G-code Converter
 
-A single-file HTML tool that converts G-code by adding **D** (cumulative degrees) and **rotQty** comments to each line. It matches the behavior of the FileMaker "CNC FIXER" utility so you can use it in the browser or embed it (e.g. in Notion) without a server.
+A single-file HTML tool that converts G-code by adding **D** (cumulative degrees) and **rotQty** comments to each line. Designed for embedding in Notion (or use in the browser); no server required.
 
 ---
 
@@ -20,7 +20,7 @@ A single-file HTML tool that converts G-code by adding **D** (cumulative degrees
 
 2. **Conversion parameters**  
    - **partDiameter**, **desiredSurfaceSpeed** — used to compute **travelSpeedF** (read-only).  
-   - **startingLathePosition** — D values start from this and accumulate (default 0). Set to match FileMaker if you want identical D numbers.  
+   - **startingLathePosition** — D values start from this and accumulate (default 0).  
    - **finalLathePosition** — filled in after Convert (read-only).
 
 3. **Paste your G-code** into the **Input** box (e.g. `U-21.672 W26.607 F200.` or `X777.367 Z12.7`).
@@ -40,15 +40,15 @@ A single-file HTML tool that converts G-code by adding **D** (cumulative degrees
 | Planar   | **U** and **W** or **V** and **W** | 2D planar paths        |
 | Lathe    | **X**, **Z** (and optionally **Y**, **A**) | Lathe / XYZ toolpaths  |
 
-- Missing axes on a line are treated as **0** for segment distance (FileMaker-style). That can create "spikes" in D/rotQty when an axis appears or disappears between lines.
+- Missing axes on a line are treated as **0** for segment distance. That can create "spikes" in D/rotQty when an axis appears or disappears between lines.
 - **A** is kept on the line but not used in the distance calculation.
 
 ---
 
 ## Key parameters
 
-- **passWidth** — Used in rotQty = segmentDistance ÷ passWidth. Must match the value you use in FileMaker for the same results.
-- **startingLathePosition** — First D value = this + ΔD for the first segment. Set to your FileMaker starting value to get matching D numbers.
+- **passWidth** — Used in rotQty = segmentDistance ÷ passWidth.
+- **startingLathePosition** — First D value = this + ΔD for the first segment.
 - **travelSpeedF** — Computed from passWidth × desiredSurfaceSpeed ÷ (partDiameter × π). Read-only; for reference when setting feed (F).
 
 ---
@@ -66,9 +66,9 @@ For **U,W** or **V,W** input, the path is drawn as a 2D shape in the Top view an
 
 ---
 
-## Embedding (e.g. Notion)
+## Embedding in Notion
 
-Host the HTML file (e.g. on Cloudflare Pages, Vercel, or Netlify) and use the public URL in Notion's **/embed** block. Notion cannot run pasted HTML/JS directly; it must load the page from a URL. The layout is kept compact so it fits inside a typical embed without scrolling.
+Host the HTML file (e.g. on Cloudflare Pages, Vercel, or Netlify) and use the public URL in Notion's **/embed** block. The layout is kept compact so it fits inside the embed without scrolling.
 
 ---
 
