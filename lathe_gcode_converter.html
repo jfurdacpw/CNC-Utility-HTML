@@ -28,6 +28,8 @@
     .start-pos { background: rgba(0,180,0,.12); }
     .final-pos { background: rgba(220,0,0,.12); }
     .card-title { font-weight: 650; margin-bottom: 4px; font-size: 13px; }
+    .toolpath-wrap { position: relative; width: 100%; min-height: 140px; background: var(--toolpath-bg, #1a1a1a); border-radius: 6px; }
+    .toolpath-wrap canvas { display: block; width: 100%; height: 100%; }
     @media (max-width: 980px) { .grid { grid-template-columns: 1fr; } }
   </style>
 </head>
@@ -85,6 +87,14 @@
         <div class="card-title">Output</div>
         <textarea id="output" placeholder="Converted output..." readonly></textarea>
       </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">Toolpath</div>
+      <div class="toolpath-wrap">
+        <canvas id="toolpath" style="max-height: 200px; width: 100%; display: block;"></canvas>
+      </div>
+      <div class="hint" style="margin-top:4px;">X,Z (lathe) or V,W from input. Updates after Convert.</div>
     </div>
 
   </div>
@@ -265,6 +275,149 @@
     return { text: outLines.join("\n"), finalLathePosition: lastD };
   }
 
+  // Extract path points from input for toolpath visualizer (continuous path: missing axis = previous)
+  function extractPathPoints(inputText) {
+    let normalized = inputText.replace(/\r\n/g, "\n").replace(/\r/g, "\n").replace(/\n\n/g, "\n");
+    const lines = normalized.split("\n");
+    const points = [];
+    let prevV = null, prevW = null;
+    let prevX = null, prevY = null, prevZ = null;
+    const linePrefix = ($("lineNumberType") && $("lineNumberType").value) ? ($("lineNumberType").value || "N").trim() : "N";
+
+    for (const rawLine of lines) {
+      const trimmed = rawLine.trim();
+      if (!trimmed.length) continue;
+      const tokens = trimmed.split(/\s+/);
+      if (tokens.length && isLineNumberToken(tokens[0], linePrefix)) tokens.shift();
+
+      let vVal = null, wVal = null, xVal = null, yVal = null, zVal = null;
+      for (let i = 0; i < tokens.length; i++) {
+        const p = parseTokenNumber(tokens[i]);
+        if (!p) continue;
+        const letter = p.letter, val = p.value;
+        if (letter === "V") vVal = val;
+        else if (letter === "W") wVal = val;
+        else if (letter === "X") xVal = val;
+        else if (letter === "Y") yVal = val;
+        else if (letter === "Z") zVal = val;
+      }
+
+      const hasVW = vVal != null && wVal != null && Number.isFinite(vVal) && Number.isFinite(wVal);
+      const hasXYZ = (xVal != null && Number.isFinite(xVal)) || (yVal != null && Number.isFinite(yVal)) || (zVal != null && Number.isFinite(zVal));
+
+      if (hasVW) {
+        const v = Number(vVal), w = Number(wVal);
+        if (prevV === null && prevW === null) {
+          points.push({ v, w });
+        } else {
+          points.push({ v, w });
+        }
+        prevV = v; prevW = w;
+      } else if (hasXYZ) {
+        const x = (xVal != null && Number.isFinite(xVal)) ? Number(xVal) : (prevX != null ? prevX : 0);
+        const y = (yVal != null && Number.isFinite(yVal)) ? Number(yVal) : (prevY != null ? prevY : 0);
+        const z = (zVal != null && Number.isFinite(zVal)) ? Number(zVal) : (prevZ != null ? prevZ : 0);
+        if (prevX === null && prevY === null && prevZ === null) {
+          points.push({ x, y, z });
+        } else {
+          points.push({ x, y, z });
+        }
+        prevX = x; prevY = y; prevZ = z;
+      }
+    }
+
+    if (points.length >= 2 && points[0].v !== undefined) return { points, mode: "vw" };
+    if (points.length >= 2 && (points[0].x !== undefined || points[0].z !== undefined)) return { points, mode: "xyz" };
+    return { points: [], mode: "xyz" };
+  }
+
+  function drawToolpath(canvas, data) {
+    const ctx = canvas.getContext("2d");
+    const dpr = Math.min(2, window.devicePixelRatio || 1);
+    const wrap = canvas.closest(".toolpath-wrap");
+    const cw = wrap && wrap.clientWidth > 0 ? wrap.clientWidth : 600;
+    const ch = Math.min(200, wrap && wrap.clientHeight > 0 ? wrap.clientHeight : 140);
+    if (canvas.width !== cw * dpr || canvas.height !== ch * dpr) {
+      canvas.width = cw * dpr;
+      canvas.height = ch * dpr;
+      canvas.style.width = cw + "px";
+      canvas.style.height = ch + "px";
+    }
+    const drawW = cw;
+    const drawH = ch;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    if (!ctx || !data || !data.points.length) {
+      ctx.clearRect(0, 0, drawW, drawH);
+      return;
+    }
+    const { points, mode } = data;
+    const padding = 12;
+    const xMin = 0, xMax = drawW - 2 * padding, yMin = 0, yMax = drawH - 2 * padding;
+
+    let loA = Infinity, hiA = -Infinity, loB = Infinity, hiB = -Infinity;
+    if (mode === "vw") {
+      points.forEach(p => {
+        loA = Math.min(loA, p.v); hiA = Math.max(hiA, p.v);
+        loB = Math.min(loB, p.w); hiB = Math.max(hiB, p.w);
+      });
+    } else {
+      // X,Z lathe: Z along bed (horizontal), X radial (vertical)
+      points.forEach(p => {
+        const a = p.z != null ? p.z : p.x;
+        const b = p.x != null ? p.x : p.z;
+        loA = Math.min(loA, a); hiA = Math.max(hiA, a);
+        loB = Math.min(loB, b); hiB = Math.max(hiB, b);
+      });
+    }
+    const rangeA = hiA - loA || 1;
+    const rangeB = hiB - loB || 1;
+    const scaleA = (xMax - xMin) / rangeA;
+    const scaleB = (yMax - yMin) / rangeB;
+    const scale = Math.min(scaleA, scaleB);
+    const midA = (loA + hiA) / 2;
+    const midB = (loB + hiB) / 2;
+    const pathW = rangeA * scale;
+    const pathH = rangeB * scale;
+    const ox = padding + (xMax - xMin - pathW) / 2 + (rangeA * scale) / 2 - (midA - loA) * scale;
+    const oy = padding + (yMax - yMin - pathH) / 2 + (rangeB * scale) / 2 - (midB - loB) * scale;
+
+    const toX = (a) => ox + (a - loA) * scale;
+    const toY = (b) => oy + (b - loB) * scale;
+
+    const isDark = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
+    ctx.fillStyle = isDark ? "#1a1a1a" : "#f0f0f0";
+    ctx.fillRect(0, 0, drawW, drawH);
+    ctx.strokeStyle = isDark ? "#00d4aa" : "#0a6b5a";
+    ctx.fillStyle = isDark ? "#00d4aa" : "#0a6b5a";
+    ctx.lineWidth = 1.5;
+    ctx.lineJoin = "round";
+    ctx.lineCap = "round";
+    ctx.beginPath();
+    if (mode === "vw") {
+      ctx.moveTo(toX(points[0].v), toY(points[0].w));
+      for (let i = 1; i < points.length; i++) ctx.lineTo(toX(points[i].v), toY(points[i].w));
+    } else {
+      const ax = (p) => (p.z != null ? p.z : p.x);
+      const ay = (p) => (p.x != null ? p.x : p.z);
+      ctx.moveTo(toX(ax(points[0])), toY(ay(points[0])));
+      for (let i = 1; i < points.length; i++) ctx.lineTo(toX(ax(points[i])), toY(ay(points[i])));
+    }
+    ctx.stroke();
+    // Start point
+    const px = mode === "vw" ? toX(points[0].v) : toX(points[0].z != null ? points[0].z : points[0].x);
+    const py = mode === "vw" ? toY(points[0].w) : toY(points[0].x != null ? points[0].x : points[0].z);
+    ctx.beginPath();
+    ctx.arc(px, py, 3, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  function updateToolpath() {
+    const canvas = $("toolpath");
+    if (!canvas) return;
+    const data = extractPathPoints($("input").value || "");
+    drawToolpath(canvas, data);
+  }
+
   function setStatus(msg) {
     $("status").textContent = msg || "";
     if (msg) setTimeout(() => { $("status").textContent = ""; }, 2500);
@@ -294,6 +447,7 @@
     $("output").value = result.text;
     $("finalLathePosition").value = result.finalLathePosition != null ? String(result.finalLathePosition) : "";
     setStatus("Converted.");
+    updateToolpath();
   }
 
   $("btnConvert").addEventListener("click", doConvert);
@@ -312,6 +466,11 @@
     $(id).addEventListener("input", updateTravelSpeedF);
   });
   updateTravelSpeedF();
+
+  updateToolpath();
+  const ro = typeof ResizeObserver !== "undefined" ? new ResizeObserver(() => updateToolpath()) : null;
+  const wrap = document.querySelector(".toolpath-wrap");
+  if (ro && wrap) ro.observe(wrap);
 
   $("btnCopy").addEventListener("click", async () => {
     try {
