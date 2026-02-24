@@ -28,8 +28,10 @@
     .start-pos { background: rgba(0,180,0,.12); }
     .final-pos { background: rgba(220,0,0,.12); }
     .card-title { font-weight: 650; margin-bottom: 4px; font-size: 13px; }
-    .toolpath-wrap { position: relative; width: 100%; min-height: 140px; background: var(--toolpath-bg, #1a1a1a); border-radius: 6px; }
+    .toolpath-wrap { position: relative; width: 100%; min-height: 280px; background: var(--toolpath-bg, #1a1a1a); border-radius: 6px; }
     .toolpath-wrap canvas { display: block; width: 100%; height: 100%; }
+    .view-label { position: absolute; font-size: 10px; opacity: 0.9; pointer-events: none; color: #00d4aa; }
+    @media (prefers-color-scheme: light) { .view-label { color: #0a6b5a; } }
     @media (max-width: 980px) { .grid { grid-template-columns: 1fr; } }
   </style>
 </head>
@@ -92,9 +94,13 @@
     <div class="card">
       <div class="card-title">Toolpath</div>
       <div class="toolpath-wrap">
-        <canvas id="toolpath" style="max-height: 200px; width: 100%; display: block;"></canvas>
+        <canvas id="toolpath" style="max-height: 320px; width: 100%; display: block;"></canvas>
+        <span class="view-label" id="viewTop" style="top: 6px; left: 8px;">Top</span>
+        <span class="view-label" id="viewIso" style="top: 6px; right: 8px;">Iso</span>
+        <span class="view-label" id="viewFront" style="bottom: 6px; left: 8px;">Front</span>
+        <span class="view-label" id="viewRight" style="bottom: 6px; right: 8px;">Right</span>
       </div>
-      <div class="hint" style="margin-top:4px;">Isometric view of X,Y,Z (lathe) or V,W (planar). Updates after Convert.</div>
+      <div class="hint" style="margin-top:4px;">Top / Front / Right (orthographic) + Isometric. X,Y,Z or V,W. Updates after Convert.</div>
     </div>
 
   </div>
@@ -336,7 +342,7 @@
     const dpr = Math.min(2, window.devicePixelRatio || 1);
     const wrap = canvas.closest(".toolpath-wrap");
     const cw = wrap && wrap.clientWidth > 0 ? wrap.clientWidth : 600;
-    const ch = Math.min(200, wrap && wrap.clientHeight > 0 ? wrap.clientHeight : 140);
+    const ch = Math.min(320, wrap && wrap.clientHeight > 0 ? wrap.clientHeight : 280);
     if (canvas.width !== cw * dpr || canvas.height !== ch * dpr) {
       canvas.width = cw * dpr;
       canvas.height = ch * dpr;
@@ -346,61 +352,75 @@
     const drawW = cw;
     const drawH = ch;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    if (!ctx || !data || !data.points.length) {
-      ctx.clearRect(0, 0, drawW, drawH);
-      return;
-    }
-    const { points, mode } = data;
-    const padding = 12;
-    const plotW = drawW - 2 * padding;
-    const plotH = drawH - 2 * padding;
-    // Isometric projection: (x,y,z) -> sx = (x-y)*cos30, sy = z - (x+y)*sin30 (Z-up = positive sy)
-    const C = Math.cos(Math.PI / 6), S = Math.sin(Math.PI / 6);
-    const project = (p) => {
-      let x = 0, y = 0, z = 0;
-      if (mode === "vw") {
-        x = p.v; y = p.w; z = 0;
-      } else {
-        x = p.x != null ? p.x : 0;
-        y = p.y != null ? p.y : 0;
-        z = p.z != null ? p.z : 0;
-      }
-      return { sx: (x - y) * C, sy: z - (x + y) * S };
-    };
-    const projected = points.map(project);
-    let minSx = Infinity, maxSx = -Infinity, minSy = Infinity, maxSy = -Infinity;
-    projected.forEach(({ sx, sy }) => {
-      minSx = Math.min(minSx, sx); maxSx = Math.max(maxSx, sx);
-      minSy = Math.min(minSy, sy); maxSy = Math.max(maxSy, sy);
-    });
-    const rangeSx = maxSx - minSx || 1;
-    const rangeSy = maxSy - minSy || 1;
-    const scale = Math.min(plotW / rangeSx, plotH / rangeSy);
-    const ox = padding + (plotW - rangeSx * scale) / 2 - minSx * scale;
-    const oy = padding + (plotH - rangeSy * scale) / 2 - minSy * scale;
-    // Canvas Y down; isometric sy has Z-up positive, so put higher sy toward bottom: canvasY = oy + sy*scale
-    const toScreenX = (sx) => ox + sx * scale;
-    const toScreenY = (sy) => oy + sy * scale;
-
     const isDark = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
     ctx.fillStyle = isDark ? "#1a1a1a" : "#f0f0f0";
     ctx.fillRect(0, 0, drawW, drawH);
+    if (!ctx || !data || !data.points.length) return;
+
+    const { points, mode } = data;
+    // Normalize to 3D (x,y,z) for all views. V,W -> (v, w, 0)
+    const pts3 = points.map(p => {
+      if (mode === "vw") return { x: p.v, y: p.w, z: 0 };
+      return {
+        x: p.x != null ? p.x : 0,
+        y: p.y != null ? p.y : 0,
+        z: p.z != null ? p.z : 0
+      };
+    });
+
+    const halfW = drawW / 2;
+    const halfH = drawH / 2;
+    const pad = 8;
+    const views = [
+      { name: "Top",   x: 0,      y: 0,      w: halfW, h: halfH, toScreen: (p) => ({ sx: p.x, sy: p.y }) },
+      { name: "Iso",   x: halfW,  y: 0,      w: halfW, h: halfH, toScreen: (p) => {
+        const C = Math.cos(Math.PI / 6), S = Math.sin(Math.PI / 6);
+        return { sx: (p.x - p.y) * C, sy: p.z - (p.x + p.y) * S };
+      }},
+      { name: "Front", x: 0,      y: halfH,  w: halfW, h: halfH, toScreen: (p) => ({ sx: p.x, sy: p.z }) },
+      { name: "Right", x: halfW,  y: halfH,  w: halfW, h: halfH, toScreen: (p) => ({ sx: p.y, sy: p.z }) }
+    ];
+
     ctx.strokeStyle = isDark ? "#00d4aa" : "#0a6b5a";
     ctx.fillStyle = isDark ? "#00d4aa" : "#0a6b5a";
     ctx.lineWidth = 1.5;
     ctx.lineJoin = "round";
     ctx.lineCap = "round";
-    ctx.beginPath();
-    const p0 = projected[0];
-    ctx.moveTo(toScreenX(p0.sx), toScreenY(p0.sy));
-    for (let i = 1; i < projected.length; i++) {
-      const p = projected[i];
-      ctx.lineTo(toScreenX(p.sx), toScreenY(p.sy));
-    }
-    ctx.stroke();
-    ctx.beginPath();
-    ctx.arc(toScreenX(p0.sx), toScreenY(p0.sy), 3, 0, Math.PI * 2);
-    ctx.fill();
+
+    views.forEach(view => {
+      const plotW = view.w - 2 * pad;
+      const plotH = view.h - 2 * pad;
+      const proj = pts3.map(p => view.toScreen(p));
+      let minSx = Infinity, maxSx = -Infinity, minSy = Infinity, maxSy = -Infinity;
+      proj.forEach(({ sx, sy }) => {
+        minSx = Math.min(minSx, sx); maxSx = Math.max(maxSx, sx);
+        minSy = Math.min(minSy, sy); maxSy = Math.max(maxSy, sy);
+      });
+      const rangeSx = maxSx - minSx || 1;
+      const rangeSy = maxSy - minSy || 1;
+      const scale = Math.min(plotW / rangeSx, plotH / rangeSy);
+      const ox = view.x + pad + (plotW - rangeSx * scale) / 2 - minSx * scale;
+      const oy = view.y + pad + (plotH - rangeSy * scale) / 2 - minSy * scale;
+      const toX = (sx) => ox + sx * scale;
+      const toY = (sy) => oy + sy * scale;
+
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(view.x, view.y, view.w, view.h);
+      ctx.clip();
+      ctx.strokeStyle = isDark ? "rgba(127,127,127,.4)" : "rgba(0,0,0,.15)";
+      ctx.strokeRect(view.x + 0.5, view.y + 0.5, view.w - 1, view.h - 1);
+      ctx.strokeStyle = isDark ? "#00d4aa" : "#0a6b5a";
+      ctx.fillStyle = isDark ? "#00d4aa" : "#0a6b5a";
+      ctx.beginPath();
+      ctx.moveTo(toX(proj[0].sx), toY(proj[0].sy));
+      for (let i = 1; i < proj.length; i++) ctx.lineTo(toX(proj[i].sx), toY(proj[i].sy));
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.arc(toX(proj[0].sx), toY(proj[0].sy), 2.5, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    });
   }
 
   function updateToolpath() {
